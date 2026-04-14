@@ -40,11 +40,10 @@ exec zsh
 - Runs `eval "$(goose term init zsh)"` automatically if the current shell does not already have `AGENT_SESSION_ID`.
 - On shell start and after `cd`, queries Goose for a single command suggestion.
 - Reads command history from `~/Library/Application Support/McFly/history.db`.
-- Passes the last shell command and its exit status to Goose on each refresh.
-- If the last command exited with status `1`, it prefers a fix-oriented follow-up such as verbose reruns or targeted inspection for that command.
+- Passes the last shell command, its exit status, and the previous command output to Goose on each refresh.
+- If the last command exited with status `1`, it prefers a fix-oriented follow-up such as verbose reruns, targeted inspection, or output-specific fixes like `go mod init ...`.
 - Falls back to a history-based command if Goose does not return a valid single-line command.
 - Press `Ctrl+G` to refresh the suggestion manually. If you already typed a partial command, Goose is asked to continue that prefix.
-- If you press Enter on a simple unknown command such as `s`, the shell first asks Goose for a matching completion and replaces the buffer instead of immediately failing with `command not found`.
 
 ## Configuration
 

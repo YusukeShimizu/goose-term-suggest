@@ -17,6 +17,9 @@ typeset -g GOOSE_TERM_SUGGEST_LAST_KEY=""
 typeset -g GOOSE_TERM_SUGGEST_NEEDS_REFRESH=1
 typeset -g GOOSE_TERM_SUGGEST_LAST_COMMAND=""
 typeset -g GOOSE_TERM_SUGGEST_LAST_STATUS=0
+typeset -g GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE=""
+typeset -g GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD=""
+typeset -g GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD=""
 
 if command -v goose >/dev/null 2>&1 && [[ -z "${AGENT_SESSION_ID:-}" ]]; then
   eval "$(goose term init zsh)"
@@ -39,6 +42,23 @@ function __goose_term_suggest_context_key() {
 
 function __goose_term_suggest_track_preexec() {
   GOOSE_TERM_SUGGEST_LAST_COMMAND="$1"
+  GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/goose-term-suggest.XXXXXX")"
+  exec {GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD}>&1
+  exec {GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD}>&2
+  exec > >(tee "$GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE") 2>&1
+}
+
+function __goose_term_suggest_stop_capture() {
+  if [[ -n "$GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD" ]]; then
+    exec 1>&$GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD
+    exec {GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD}>&-
+    GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD=""
+  fi
+  if [[ -n "$GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD" ]]; then
+    exec 2>&$GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD
+    exec {GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD}>&-
+    GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD=""
+  fi
 }
 
 function __goose_term_suggest_fetch() {
@@ -56,12 +76,14 @@ function __goose_term_suggest_fetch() {
     --model "$GOOSE_TERM_SUGGEST_MODEL" \
     --partial "$partial" \
     --last-command "$last_command" \
-    --last-status "$last_status" 2>/dev/null
+    --last-status "$last_status" \
+    --last-output-file "$GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE" 2>/dev/null
 }
 
 function __goose_term_suggest_queue() {
   local last_status=$?
   local key suggestion
+  __goose_term_suggest_stop_capture
   GOOSE_TERM_SUGGEST_LAST_STATUS=$last_status
   key="$(__goose_term_suggest_context_key)"
   if [[ "$GOOSE_TERM_SUGGEST_NEEDS_REFRESH" != "1" && "$GOOSE_TERM_SUGGEST_LAST_KEY" == "$key" ]]; then
@@ -100,49 +122,7 @@ function __goose_term_suggest_manual_widget() {
   [[ -n "${WIDGET:-}" ]] && zle redisplay
 }
 
-function __goose_term_suggest_command_known() {
-  local cmd="$1"
-  [[ -z "$cmd" ]] && return 1
-  (( $+commands[$cmd] )) && return 0
-  (( $+functions[$cmd] )) && return 0
-  (( $+aliases[$cmd] )) && return 0
-  (( $+builtins[$cmd] )) && return 0
-  (( $+reswords[$cmd] )) && return 0
-  return 1
-}
-
-function __goose_term_suggest_try_complete_unknown() {
-  local -a words
-  local first suggestion
-
-  [[ -z "$BUFFER" ]] && return 1
-  [[ "$BUFFER" == *['|&;<>`$(){}[]']* ]] && return 1
-
-  words=(${(z)BUFFER})
-  (( ${#words[@]} == 0 )) && return 1
-
-  first="${words[1]}"
-  __goose_term_suggest_command_known "$first" && return 1
-
-  suggestion="$(__goose_term_suggest_fetch "$BUFFER" "$GOOSE_TERM_SUGGEST_LAST_COMMAND" "$GOOSE_TERM_SUGGEST_LAST_STATUS")"
-  [[ -z "$suggestion" || "$suggestion" == "$BUFFER" ]] && return 1
-
-  BUFFER="$suggestion"
-  CURSOR=${#BUFFER}
-  GOOSE_TERM_SUGGEST_PENDING=""
-  GOOSE_TERM_SUGGEST_LAST_KEY="$(__goose_term_suggest_context_key)"
-  GOOSE_TERM_SUGGEST_NEEDS_REFRESH=0
-  [[ -n "${WIDGET:-}" ]] && zle redisplay
-  return 0
-}
-
-function __goose_term_suggest_accept_line() {
-  __goose_term_suggest_try_complete_unknown && return 0
-  zle .accept-line
-}
-
 zle -N goose-term-suggest-refresh __goose_term_suggest_manual_widget
-zle -N accept-line __goose_term_suggest_accept_line
 bindkey '^G' goose-term-suggest-refresh
 
 add-zsh-hook preexec __goose_term_suggest_track_preexec

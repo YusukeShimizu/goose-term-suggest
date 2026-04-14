@@ -45,6 +45,9 @@ class GooseTermSuggestTests(unittest.TestCase):
             partial="",
             last_command="claude --dangerously-skip-permissions",
             last_status=1,
+            last_output="",
+            cwd="/tmp/project",
+            repo_root="/tmp/project",
             exact=[goose_term_suggest.HistoryEntry(cmd="go test ./...", uses=3, last_run=10, scope="pwd")],
             repo=[],
             recent_exact=[],
@@ -65,6 +68,9 @@ class GooseTermSuggestTests(unittest.TestCase):
             partial="",
             last_command="go test ./...",
             last_status=1,
+            last_output="",
+            cwd="/tmp/project",
+            repo_root="/tmp/project",
             exact=[goose_term_suggest.HistoryEntry(cmd="git status", uses=3, last_run=10, scope="pwd")],
             repo=[],
             recent_exact=[],
@@ -72,6 +78,26 @@ class GooseTermSuggestTests(unittest.TestCase):
             fallback="git status",
         )
         self.assertEqual(candidates[0], "go test ./... 2>&1 | tail -n 80")
+
+    def test_output_followups_for_go_module_error(self):
+        self.assertEqual(
+            goose_term_suggest.output_followups(
+                "go test",
+                "/tmp/goose-term-suggest",
+                "/tmp/goose-term-suggest",
+                "go: cannot find main module, but found .git/config\n        to create a module there, run:\n        go mod init\n",
+            ),
+            ["go mod init goose-term-suggest", "go test ./..."],
+        )
+
+    def test_load_last_output_from_file(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "out.txt"
+            path.write_text("hello\nworld\n", encoding="utf-8")
+            self.assertEqual(goose_term_suggest.load_last_output("", str(path)), "hello\nworld")
 
 
 if __name__ == "__main__":

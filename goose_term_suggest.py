@@ -21,6 +21,7 @@ GOOSE_TIMEOUT_SECONDS = 12
 EXACT_LIMIT = 15
 REPO_LIMIT = 25
 RECENT_LIMIT = 8
+LAST_OUTPUT_LIMIT = 4000
 _WHITESPACE_RE = re.compile(r"\s+")
 _CODE_BLOCK_RE = re.compile(r"```(?:[^\n]*\n)?(.*?)```", re.DOTALL)
 LOW_SIGNAL_COMMANDS = (
@@ -276,6 +277,9 @@ def build_candidate_pool(
     partial: str,
     last_command: str,
     last_status: int,
+    last_output: str,
+    cwd: str,
+    repo_root: str,
     exact: list[HistoryEntry],
     repo: list[HistoryEntry],
     recent_exact: list[RecentEntry],
@@ -292,6 +296,8 @@ def build_candidate_pool(
             candidates.append(normalized)
 
     if last_status == 1 and last_command:
+        for cmd in output_followups(last_command, cwd, repo_root, last_output):
+            add(cmd)
         for cmd in failure_followups(last_command):
             add(cmd)
     if last_command:
@@ -342,12 +348,26 @@ def failure_followups(last_command: str) -> list[str]:
     return []
 
 
+def output_followups(last_command: str, cwd: str, repo_root: str, last_output: str) -> list[str]:
+    output = last_output.lower()
+    repo_name = Path(repo_root or cwd).name or "my-module"
+
+    if "cannot find main module" in output and "go mod init" in output:
+        return [f"go mod init {repo_name}", "go test ./..."]
+
+    if "no required module provides package" in output and last_command.startswith("go "):
+        return ["go mod tidy"]
+
+    return []
+
+
 def build_prompt(
     cwd: str,
     repo_root: str,
     partial: str,
     last_command: str,
     last_status: int,
+    last_output: str,
     exact: list[HistoryEntry],
     repo: list[HistoryEntry],
     recent_exact: list[RecentEntry],
@@ -387,6 +407,8 @@ def build_prompt(
                 "Interpret the result: exit status 0 means success, non-zero means failure.",
             ]
         )
+    if last_output:
+        prompt.extend(["", "Last command output (truncated):", last_output])
     prompt.extend(["", "Candidate commands (choose one exactly):"])
     prompt.extend(f"- {candidate}" for candidate in candidates)
     if recent_exact:
@@ -484,6 +506,7 @@ def suggest_command(
     partial: str,
     last_command: str,
     last_status: int,
+    last_output: str,
 ) -> str:
     exact, repo, recent_exact, recent_repo = query_history(history_db, cwd, repo_root)
     fallback = default_candidate(cwd, repo_root, exact, repo)
@@ -495,6 +518,9 @@ def suggest_command(
         partial,
         last_command,
         last_status,
+        last_output,
+        cwd,
+        repo_root,
         exact,
         repo,
         recent_exact,
@@ -507,6 +533,7 @@ def suggest_command(
         partial,
         last_command,
         last_status,
+        last_output,
         exact,
         repo,
         recent_exact,
@@ -546,14 +573,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--partial", default="", help="Partial command prefix to continue")
     parser.add_argument("--last-command", default="", help="Last shell command that ran before the prompt")
     parser.add_argument("--last-status", type=int, default=0, help="Exit status for the last command")
+    parser.add_argument("--last-output", default="", help="Truncated output from the last shell command")
+    parser.add_argument("--last-output-file", default="", help="File containing output from the last shell command")
     parser.add_argument("--print-debug", action="store_true", help="Print debug data to stderr")
     return parser.parse_args(argv)
+
+
+def load_last_output(last_output: str, last_output_file: str) -> str:
+    if last_output_file:
+        try:
+            text = Path(last_output_file).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            text = ""
+    else:
+        text = last_output
+    text = text.strip()
+    if len(text) > LAST_OUTPUT_LIMIT:
+        text = text[-LAST_OUTPUT_LIMIT:]
+    return text
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     cwd = os.path.abspath(os.path.expanduser(args.pwd))
     repo_root = os.path.abspath(os.path.expanduser(args.repo_root)) if args.repo_root else ""
+    last_output = load_last_output(args.last_output, args.last_output_file)
     suggestion = suggest_command(
         cwd,
         repo_root,
@@ -562,12 +606,14 @@ def main(argv: list[str] | None = None) -> int:
         args.partial,
         _normalize_cmd(args.last_command),
         args.last_status,
+        last_output,
     )
     if args.print_debug:
         exact, repo, recent_exact, recent_repo = query_history(args.history_db, cwd, repo_root)
         print(f"cwd={cwd}", file=sys.stderr)
         print(f"repo_root={repo_root}", file=sys.stderr)
         print(f"last_command={args.last_command!r} last_status={args.last_status}", file=sys.stderr)
+        print(f"last_output={last_output!r}", file=sys.stderr)
         print(f"exact={len(exact)} repo={len(repo)} recent_exact={len(recent_exact)} recent_repo={len(recent_repo)}", file=sys.stderr)
         print(f"suggestion={suggestion}", file=sys.stderr)
     if suggestion:
