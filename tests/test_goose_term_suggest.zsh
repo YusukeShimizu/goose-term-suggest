@@ -44,6 +44,7 @@ function reset_state() {
 function goose() {
   print -r -- "goose $1 $2" >> "$GOOSE_LOG"
   if [[ "$1" == "term" && "$2" == "run" ]]; then
+    print -r -- "model=${GOOSE_MODEL:-}" >> "$GOOSE_LOG"
     print -r -- "${GOOSE_RESPONSE:-}"
     return 0
   fi
@@ -68,7 +69,8 @@ export AGENT_SESSION_ID="session"
 GOOSE_RESPONSE="git status"
 __goose_term_suggest_queue
 assert_eq "git status" "$GOOSE_TERM_SUGGEST_PENDING" "first prompt should fetch one suggestion"
-assert_eq "1" "$(wc -l < "$GOOSE_LOG" | tr -d ' ')" "first prompt should call goose once"
+assert_eq "2" "$(wc -l < "$GOOSE_LOG" | tr -d ' ')" "first prompt should log one goose call and one model line"
+assert_file_contains "$GOOSE_LOG" "model=gpt-5.4-nano-low" "suggestion should force gpt-5.4-nano-low"
 
 BUFFER=""
 CURSOR=0
@@ -86,14 +88,14 @@ assert_eq "git diff" "$GOOSE_TERM_SUGGEST_PENDING" "pending should remain when b
 
 GOOSE_RESPONSE="git diff"
 __goose_term_suggest_queue
-assert_eq "1" "$(wc -l < "$GOOSE_LOG" | tr -d ' ')" "same prompt without cd should not refetch"
+assert_eq "2" "$(wc -l < "$GOOSE_LOG" | tr -d ' ')" "same prompt without cd should not refetch"
 
 OLD_PWD="$PWD"
 cd "$TMP_DIR"
 __goose_term_suggest_mark_dirty
 GOOSE_RESPONSE="ls"
 __goose_term_suggest_queue
-assert_eq "2" "$(wc -l < "$GOOSE_LOG" | tr -d ' ')" "cd should trigger one more fetch"
+assert_eq "4" "$(wc -l < "$GOOSE_LOG" | tr -d ' ')" "cd should trigger one more fetch"
 assert_eq "ls" "$GOOSE_TERM_SUGGEST_PENDING" "cd should refresh pending suggestion"
 cd "$OLD_PWD"
 

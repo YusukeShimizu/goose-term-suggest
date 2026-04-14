@@ -9,6 +9,7 @@ autoload -Uz add-zsh-hook
 autoload -Uz add-zle-hook-widget 2>/dev/null || true
 
 typeset -g GOOSE_TERM_SUGGEST_HOME="${GOOSE_TERM_SUGGEST_HOME:-${${(%):-%N}:A:h:h}}"
+typeset -g GOOSE_TERM_SUGGEST_MODEL="${GOOSE_TERM_SUGGEST_MODEL:-gpt-5.4-nano-low}"
 typeset -g GOOSE_TERM_SUGGEST_PENDING=""
 typeset -g GOOSE_TERM_SUGGEST_LAST_KEY=""
 typeset -g GOOSE_TERM_SUGGEST_NEEDS_REFRESH=1
@@ -62,7 +63,7 @@ function __goose_term_suggest_fetch() {
   local repo_root prompt suggestion
   repo_root="$(__goose_term_suggest_repo_root)"
   prompt="$(__goose_term_suggest_build_prompt "$repo_root")"
-  suggestion="$(goose term run "$prompt" 2>/dev/null)" || return 0
+  suggestion="$(GOOSE_MODEL="$GOOSE_TERM_SUGGEST_MODEL" goose term run "$prompt" 2>/dev/null)" || return 0
   __goose_term_suggest_sanitize "$suggestion"
 }
 

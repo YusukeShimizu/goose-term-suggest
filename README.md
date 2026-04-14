@@ -16,6 +16,12 @@ eval "$(goose term init zsh)"
 
 This project does not run Goose init for you, and it does not define or modify `@g` / `@goose`.
 
+By default, suggestions use `gpt-5.4-nano-low`. You can override that with:
+
+```bash
+export GOOSE_TERM_SUGGEST_MODEL="gpt-5.4-nano-low"
+```
+
 ## Install
 
 ```bash

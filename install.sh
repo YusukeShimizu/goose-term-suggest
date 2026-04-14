@@ -18,16 +18,26 @@ EOF
 )
 
 TMP_FILE="$(mktemp)"
+BLOCK_FILE="$(mktemp)"
+printf '%s\n' "$BLOCK" > "$BLOCK_FILE"
+
+cleanup() {
+  rm -f "$TMP_FILE" "$BLOCK_FILE"
+}
+trap cleanup EXIT
 
 if grep -Fqx "$START_MARKER" "$ZSHRC" && grep -Fqx "$END_MARKER" "$ZSHRC"; then
-  awk -v start="$START_MARKER" -v end="$END_MARKER" -v block="$BLOCK" '
+  awk -v start="$START_MARKER" -v end="$END_MARKER" -v block_file="$BLOCK_FILE" '
     BEGIN {
       in_block = 0
       replaced = 0
     }
     $0 == start {
       if (!replaced) {
-        print block
+        while ((getline line < block_file) > 0) {
+          print line
+        }
+        close(block_file)
         replaced = 1
       }
       in_block = 1
@@ -45,7 +55,10 @@ if grep -Fqx "$START_MARKER" "$ZSHRC" && grep -Fqx "$END_MARKER" "$ZSHRC"; then
         if (NR > 0) {
           print ""
         }
-        print block
+        while ((getline line < block_file) > 0) {
+          print line
+        }
+        close(block_file)
       }
     }
   ' "$ZSHRC" > "$TMP_FILE"
@@ -61,6 +74,8 @@ else
 fi
 
 mv "$TMP_FILE" "$ZSHRC"
+trap - EXIT
+cleanup
 
 echo "Installed goose-term-suggest into $ZSHRC"
 echo 'Ensure Goose terminal init is configured separately, e.g. eval "$(goose term init zsh)"'
