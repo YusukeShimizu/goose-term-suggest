@@ -86,7 +86,7 @@ function __goose_term_suggest_queue() {
   __goose_term_suggest_stop_capture
   GOOSE_TERM_SUGGEST_LAST_STATUS=$last_status
   key="$(__goose_term_suggest_context_key)"
-  if [[ "$GOOSE_TERM_SUGGEST_NEEDS_REFRESH" != "1" && "$GOOSE_TERM_SUGGEST_LAST_KEY" == "$key" ]]; then
+  if [[ "$last_status" -eq 0 && "$GOOSE_TERM_SUGGEST_NEEDS_REFRESH" != "1" && "$GOOSE_TERM_SUGGEST_LAST_KEY" == "$key" ]]; then
     return 0
   fi
 
