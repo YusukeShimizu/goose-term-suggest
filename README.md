@@ -41,16 +41,15 @@ Reload your shell:
 exec zsh
 ```
 
-## Demo
+## How It Feels
 
-![goose-term-suggest demo](docs/demo.gif)
+When you open a new shell, the prompt appears immediately and a likely next command is filled into the empty buffer a moment later. Nothing runs automatically. You can press Enter to use it, edit it, or ignore it and type something else.
 
-The demo shows:
+After you run a command, the next prompt starts another background fetch for a fresh suggestion. That means the prefilled command can follow your recent terminal activity instead of repeating the same generic command every time.
 
-- a suggestion appearing on a fresh prompt
-- a new suggestion appearing after running a command
-- a follow-up suggestion after an `@g` question
-- a refreshed suggestion after `cd`
+If your last command was an AI question such as `@g where is the config file?`, the next suggestion tries to be a concrete follow-up command such as opening or inspecting the file that was mentioned in the answer.
+
+If you `cd` into another directory, the next suggestion is refreshed for that location. In practice, that means the prefills change with the repository or subdirectory you are currently working in.
 
 ## Behavior
 
