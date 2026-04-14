@@ -2,7 +2,7 @@
 
 Minimal command prefills for `zsh`, powered by Goose.
 
-On shell start and after `cd`, this project asks Goose for a single shell command suggestion for the current directory and prefills it into an empty prompt buffer. The command is never executed automatically.
+On shell start and after `cd`, this project asks Goose for a single shell command suggestion for the current directory and prefills it into an empty prompt buffer. The shell prompt appears immediately while the suggestion is fetched in the background. The command is never executed automatically.
 
 ## Requirements
 
@@ -25,36 +25,50 @@ export GOOSE_TERM_SUGGEST_MODEL="gpt-5.4-nano-low"
 ## Install
 
 ```bash
-git clone <repo-url> ~/Desktop/goose-term-suggest
-cd ~/Desktop/goose-term-suggest
-./install.sh
-exec zsh
+git clone https://github.com/YusukeShimizu/goose-term-suggest.git ~/src/goose-term-suggest
 ```
 
-If you already copied the project manually, just run:
+Add this to `~/.zshrc`:
 
 ```bash
-cd ~/Desktop/goose-term-suggest
-./install.sh
+export GOOSE_TERM_SUGGEST_HOME="$HOME/src/goose-term-suggest"
+[ -f "$GOOSE_TERM_SUGGEST_HOME/lib/goose-terminal-suggest.zsh" ] && source "$GOOSE_TERM_SUGGEST_HOME/lib/goose-terminal-suggest.zsh"
+```
+
+Reload your shell:
+
+```bash
 exec zsh
 ```
+
+## Demo
+
+![goose-term-suggest demo](docs/demo.gif)
+
+The demo shows:
+
+- a suggestion appearing on a fresh prompt
+- a new suggestion appearing after running a command
+- a follow-up suggestion after an `@g` question
+- a refreshed suggestion after `cd`
 
 ## Behavior
 
-- On shell start, fetches one suggestion for the current directory.
-- After `cd`, fetches one new suggestion for the new directory.
-- Inserts the suggestion only when the prompt buffer is empty.
+- On shell start, begins fetching one suggestion for the current directory in the background.
+- After each executed command, begins fetching one fresh suggestion for the current directory in the background.
+- After `cd`, begins fetching one new suggestion for the new directory in the background.
+- Inserts the suggestion only when the prompt buffer is still empty.
+- Uses the most recent executed command and recent command history as context when asking Goose for the next suggestion.
 - Does nothing if `goose` is unavailable or `AGENT_SESSION_ID` is unset.
 - Uses `goose term run` against your existing Goose terminal session.
 - Rejects empty or multiline Goose output instead of forcing a fallback command.
 
-## Uninstall
-
-Remove the block between:
+## Test
 
 ```bash
-# >>> goose-term-suggest >>>
-# <<< goose-term-suggest <<<
+zsh tests/test_goose_term_suggest.zsh
 ```
 
-from `~/.zshrc`, then delete the project directory.
+## Uninstall
+
+Remove the two `goose-term-suggest` lines from `~/.zshrc`, then delete the cloned directory.
