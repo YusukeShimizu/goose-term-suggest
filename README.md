@@ -6,7 +6,9 @@ When a new terminal opens, or when you `cd` into another directory, this project
 
 - the current `pwd`
 - the current git repository root
-- successful commands from McFly history
+- the last command you ran and its exit status
+- successful and recent commands from McFly history
+- the files and directories currently present in the working directory
 
 The suggested command is inserted into the input buffer, but it is never executed automatically.
 
@@ -39,7 +41,9 @@ exec zsh
 - Runs `eval "$(goose term init zsh)"` automatically if the current shell does not already have `AGENT_SESSION_ID`.
 - On shell start and after `cd`, queries Goose for a single command suggestion.
 - Reads command history from `~/Library/Application Support/McFly/history.db`.
-- Falls back to `git status` inside a git repo or `ls -la` elsewhere if Goose does not return a valid single-line command.
+- Passes the last shell command and its exit status to Goose on each refresh.
+- Passes a top-level directory snapshot so Goose can infer likely toolchains from files such as `go.mod`, `Cargo.toml`, `package.json`, `pyproject.toml`, `Justfile`, and `Makefile`.
+- Falls back to a history-based or manifest-based command if Goose does not return a valid single-line command.
 - Press `Ctrl+G` to refresh the suggestion manually. If you already typed a partial command, Goose is asked to continue that prefix.
 
 ## Configuration

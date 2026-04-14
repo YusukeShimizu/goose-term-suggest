@@ -15,6 +15,8 @@ typeset -g GOOSE_TERM_SUGGEST_MCFLY_DB="${GOOSE_TERM_SUGGEST_MCFLY_DB:-$HOME/Lib
 typeset -g GOOSE_TERM_SUGGEST_PENDING=""
 typeset -g GOOSE_TERM_SUGGEST_LAST_KEY=""
 typeset -g GOOSE_TERM_SUGGEST_NEEDS_REFRESH=1
+typeset -g GOOSE_TERM_SUGGEST_LAST_COMMAND=""
+typeset -g GOOSE_TERM_SUGGEST_LAST_STATUS=0
 
 if command -v goose >/dev/null 2>&1 && [[ -z "${AGENT_SESSION_ID:-}" ]]; then
   eval "$(goose term init zsh)"
@@ -35,28 +37,38 @@ function __goose_term_suggest_context_key() {
   print -r -- "${root}::${PWD:A}"
 }
 
+function __goose_term_suggest_track_preexec() {
+  GOOSE_TERM_SUGGEST_LAST_COMMAND="$1"
+}
+
 function __goose_term_suggest_fetch() {
   [[ -x "$GOOSE_TERM_SUGGEST_BIN" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
-  local root partial
+  local root partial last_command last_status
   root="$(__goose_term_suggest_context_root)"
   partial="${1:-}"
+  last_command="${2:-$GOOSE_TERM_SUGGEST_LAST_COMMAND}"
+  last_status="${3:-$GOOSE_TERM_SUGGEST_LAST_STATUS}"
   "$GOOSE_TERM_SUGGEST_BIN" \
     --pwd "$PWD" \
     --repo-root "$root" \
     --history-db "$GOOSE_TERM_SUGGEST_MCFLY_DB" \
     --model "$GOOSE_TERM_SUGGEST_MODEL" \
-    --partial "$partial" 2>/dev/null
+    --partial "$partial" \
+    --last-command "$last_command" \
+    --last-status "$last_status" 2>/dev/null
 }
 
 function __goose_term_suggest_queue() {
+  local last_status=$?
   local key suggestion
+  GOOSE_TERM_SUGGEST_LAST_STATUS=$last_status
   key="$(__goose_term_suggest_context_key)"
   if [[ "$GOOSE_TERM_SUGGEST_NEEDS_REFRESH" != "1" && "$GOOSE_TERM_SUGGEST_LAST_KEY" == "$key" ]]; then
     return 0
   fi
 
-  suggestion="$(__goose_term_suggest_fetch)"
+  suggestion="$(__goose_term_suggest_fetch "" "$GOOSE_TERM_SUGGEST_LAST_COMMAND" "$last_status")"
   GOOSE_TERM_SUGGEST_PENDING="$suggestion"
   GOOSE_TERM_SUGGEST_LAST_KEY="$key"
   GOOSE_TERM_SUGGEST_NEEDS_REFRESH=0
@@ -77,7 +89,7 @@ function __goose_term_suggest_mark_dirty() {
 
 function __goose_term_suggest_manual_widget() {
   local suggestion
-  suggestion="$(__goose_term_suggest_fetch "$BUFFER")"
+  suggestion="$(__goose_term_suggest_fetch "$BUFFER" "$GOOSE_TERM_SUGGEST_LAST_COMMAND" "$GOOSE_TERM_SUGGEST_LAST_STATUS")"
   if [[ -n "$suggestion" ]]; then
     BUFFER="$suggestion"
     CURSOR=${#BUFFER}
@@ -91,6 +103,7 @@ function __goose_term_suggest_manual_widget() {
 zle -N goose-term-suggest-refresh __goose_term_suggest_manual_widget
 bindkey '^G' goose-term-suggest-refresh
 
+add-zsh-hook preexec __goose_term_suggest_track_preexec
 add-zsh-hook precmd __goose_term_suggest_queue
 add-zsh-hook chpwd __goose_term_suggest_mark_dirty
 
