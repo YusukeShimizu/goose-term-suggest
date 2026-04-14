@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -22,24 +23,6 @@ REPO_LIMIT = 25
 RECENT_LIMIT = 8
 _WHITESPACE_RE = re.compile(r"\s+")
 _CODE_BLOCK_RE = re.compile(r"```(?:[^\n]*\n)?(.*?)```", re.DOTALL)
-IMPORTANT_FILENAMES = (
-    "package.json",
-    "pnpm-lock.yaml",
-    "bun.lock",
-    "bun.lockb",
-    "yarn.lock",
-    "package-lock.json",
-    "Cargo.toml",
-    "go.mod",
-    "pyproject.toml",
-    "requirements.txt",
-    "Justfile",
-    "Makefile",
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "compose.yml",
-    "compose.yaml",
-)
 LOW_SIGNAL_COMMANDS = (
     "git status",
     "git diff",
@@ -78,12 +61,6 @@ class RecentEntry:
     exit_code: int
     when_run: int
     scope: str
-
-
-@dataclass(frozen=True)
-class DirectorySnapshot:
-    manifests: list[str]
-    entries: list[str]
 
 
 def _normalize_cmd(cmd: str) -> str:
@@ -270,72 +247,17 @@ def _dedupe_against(entries: Iterable[HistoryEntry], seen: set[str]) -> list[His
     return deduped
 
 
-def inspect_directory(cwd: str, limit: int = 30) -> DirectorySnapshot:
-    root = Path(cwd)
-    try:
-        children = list(root.iterdir())
-    except OSError:
-        return DirectorySnapshot(manifests=[], entries=[])
-
-    manifest_set = {name for name in IMPORTANT_FILENAMES if (root / name).exists()}
-    priority = {name: idx for idx, name in enumerate(IMPORTANT_FILENAMES)}
-
-    def sort_key(path: Path) -> tuple[int, int, str]:
-        name = path.name
-        manifest_priority = priority.get(name, len(priority) + 1)
-        return (manifest_priority, 0 if path.is_dir() else 1, name.lower())
-
-    children.sort(key=sort_key)
-    entries: list[str] = []
-    for path in children[:limit]:
-        suffix = "/" if path.is_dir() else ""
-        entries.append(f"{path.name}{suffix}")
-
-    manifests = [name for name in IMPORTANT_FILENAMES if name in manifest_set]
-    return DirectorySnapshot(manifests=manifests, entries=entries)
-
-
 def default_candidate(
     cwd: str,
     repo_root: str,
     exact: list[HistoryEntry],
     repo: list[HistoryEntry],
-    snapshot: DirectorySnapshot,
 ) -> str:
     if exact:
         return exact[0].cmd
     if repo:
         return repo[0].cmd
-
-    heuristic = heuristic_candidate(snapshot)
-    if heuristic:
-        return heuristic
     return "git status" if repo_root and _is_git_directory(cwd) else "ls -la"
-
-
-def heuristic_candidate(snapshot: DirectorySnapshot) -> str:
-    manifests = set(snapshot.manifests)
-    if "pnpm-lock.yaml" in manifests:
-        return "pnpm test"
-    if "bun.lock" in manifests or "bun.lockb" in manifests:
-        return "bun test"
-    if "yarn.lock" in manifests:
-        return "yarn test"
-    if "package-lock.json" in manifests or "package.json" in manifests:
-        return "npm test"
-    if "Cargo.toml" in manifests:
-        return "cargo test"
-    if "go.mod" in manifests:
-        return "go test ./..."
-    if "pyproject.toml" in manifests or "requirements.txt" in manifests:
-        return "pytest"
-    if "Justfile" in manifests:
-        return "just"
-    if "Makefile" in manifests:
-        return "make test"
-    if "docker-compose.yml" in manifests or "docker-compose.yaml" in manifests or "compose.yml" in manifests or "compose.yaml" in manifests:
-        return "docker compose ps"
-    return ""
 
 
 def _is_git_directory(cwd: str) -> bool:
@@ -358,7 +280,6 @@ def build_candidate_pool(
     repo: list[HistoryEntry],
     recent_exact: list[RecentEntry],
     recent_repo: list[RecentEntry],
-    snapshot: DirectorySnapshot,
     fallback: str,
 ) -> list[str]:
     candidates: list[str] = []
@@ -370,6 +291,9 @@ def build_candidate_pool(
         if normalized not in candidates:
             candidates.append(normalized)
 
+    if last_status == 1 and last_command:
+        for cmd in failure_followups(last_command):
+            add(cmd)
     if last_command:
         add(last_command)
     for entry in recent_exact:
@@ -381,9 +305,6 @@ def build_candidate_pool(
     for entry in repo:
         add(entry.cmd)
 
-    heuristic = heuristic_candidate(snapshot)
-    if heuristic:
-        add(heuristic)
     add(fallback)
 
     partial_text = partial.strip()
@@ -391,6 +312,34 @@ def build_candidate_pool(
         filtered = [cmd for cmd in candidates if cmd.startswith(partial_text)]
         return filtered or [partial_text]
     return candidates[:12] or [fallback]
+
+
+def failure_followups(last_command: str) -> list[str]:
+    cmd = _normalize_cmd(last_command)
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        parts = cmd.split()
+    if not parts:
+        return []
+
+    if parts[:2] == ["go", "test"]:
+        return [f"{cmd} 2>&1 | tail -n 80", "rg -n 'FAIL|panic:|expected|got|error:' ."]
+    if parts[:2] == ["go", "build"] or parts[:2] == ["go", "run"]:
+        return [f"{cmd} 2>&1 | tail -n 80"]
+    if parts[:2] == ["cargo", "test"]:
+        return ["cargo test -- --nocapture", "rg -n 'panic!|assert|expected|error' ."]
+    if parts[:2] == ["cargo", "build"]:
+        return ["cargo build -vv"]
+    if parts and parts[0] == "pytest":
+        return ["pytest -x -vv"]
+    if parts[:3] == ["python3", "-m", "pytest"]:
+        return ["python3 -m pytest -x -vv"]
+    if parts[:3] == ["python3", "-m", "unittest"]:
+        return ["python3 -m unittest -v"]
+    if parts[:2] == ["git", "commit"] or parts[:2] == ["git", "push"]:
+        return ["git status"]
+    return []
 
 
 def build_prompt(
@@ -403,7 +352,6 @@ def build_prompt(
     repo: list[HistoryEntry],
     recent_exact: list[RecentEntry],
     recent_repo: list[RecentEntry],
-    snapshot: DirectorySnapshot,
     candidates: list[str],
 ) -> str:
     repo_text = repo_root or "(none)"
@@ -413,7 +361,7 @@ def build_prompt(
         "Output one line only.",
         "Do not include markdown, quotes, bullets, or explanations.",
         "Prefer commands from the provided history when they fit the situation.",
-        "Use the last command, its exit status, and the files in the current directory heavily.",
+        "Use the last command and its exit status heavily.",
         "Do not default to git status unless repo state inspection is the strongest remaining signal.",
         "Do not suggest agent launcher commands such as goose, codex, claude, or opencode unless the user already started typing that prefix.",
         "You must choose one command from the provided candidate list and return it verbatim.",
@@ -441,13 +389,6 @@ def build_prompt(
         )
     prompt.extend(["", "Candidate commands (choose one exactly):"])
     prompt.extend(f"- {candidate}" for candidate in candidates)
-
-    if snapshot.manifests or snapshot.entries:
-        prompt.extend(["", "Directory snapshot:"])
-        if snapshot.manifests:
-            prompt.append(f"- Important files: {', '.join(snapshot.manifests)}")
-        if snapshot.entries:
-            prompt.append(f"- Top-level entries: {', '.join(snapshot.entries)}")
     if recent_exact:
         prompt.extend(["", "Recent commands in this exact directory:"])
         prompt.extend(f"- {entry.cmd} (exit={entry.exit_code})" for entry in recent_exact)
@@ -464,8 +405,7 @@ def build_prompt(
         [
             "",
             "Fallback policy:",
-            "- If strong signals point to testing or running a project command, prefer that over git status.",
-            "- If the last command failed, prefer a likely fix, retry, or follow-up inspection related to that command.",
+            "- If the last command failed with exit status 1, prefer a fix-oriented follow-up related to that command.",
             "- Only return git status if repo inspection is clearly the best next step.",
             "- If no stronger signal exists outside git, return ls -la.",
         ]
@@ -546,8 +486,7 @@ def suggest_command(
     last_status: int,
 ) -> str:
     exact, repo, recent_exact, recent_repo = query_history(history_db, cwd, repo_root)
-    snapshot = inspect_directory(cwd)
-    fallback = default_candidate(cwd, repo_root, exact, repo, snapshot)
+    fallback = default_candidate(cwd, repo_root, exact, repo)
 
     if not shutil_which("goose"):
         return _apply_partial_fallback(fallback, partial)
@@ -560,7 +499,6 @@ def suggest_command(
         repo,
         recent_exact,
         recent_repo,
-        snapshot,
         fallback,
     )
     prompt = build_prompt(
@@ -573,7 +511,6 @@ def suggest_command(
         repo,
         recent_exact,
         recent_repo,
-        snapshot,
         candidates,
     )
     raw, _ = run_goose(prompt, model)
@@ -628,12 +565,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.print_debug:
         exact, repo, recent_exact, recent_repo = query_history(args.history_db, cwd, repo_root)
-        snapshot = inspect_directory(cwd)
         print(f"cwd={cwd}", file=sys.stderr)
         print(f"repo_root={repo_root}", file=sys.stderr)
         print(f"last_command={args.last_command!r} last_status={args.last_status}", file=sys.stderr)
         print(f"exact={len(exact)} repo={len(repo)} recent_exact={len(recent_exact)} recent_repo={len(recent_repo)}", file=sys.stderr)
-        print(f"manifests={snapshot.manifests}", file=sys.stderr)
         print(f"suggestion={suggestion}", file=sys.stderr)
     if suggestion:
         print(suggestion)
