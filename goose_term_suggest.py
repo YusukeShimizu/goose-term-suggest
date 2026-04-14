@@ -16,7 +16,7 @@ from typing import Iterable
 
 
 DEFAULT_HISTORY_DB = os.path.expanduser("~/Library/Application Support/McFly/history.db")
-DEFAULT_MODEL = "gpt-5-nano"
+DEFAULT_MODEL = "gpt-5.4-nano-medium"
 GOOSE_TIMEOUT_SECONDS = 12
 EXACT_LIMIT = 15
 REPO_LIMIT = 25

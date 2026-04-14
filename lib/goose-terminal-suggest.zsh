@@ -10,7 +10,7 @@ autoload -Uz add-zle-hook-widget 2>/dev/null || true
 
 typeset -g GOOSE_TERM_SUGGEST_HOME="${GOOSE_TERM_SUGGEST_HOME:-${${(%):-%N}:A:h:h}}"
 typeset -g GOOSE_TERM_SUGGEST_BIN="${GOOSE_TERM_SUGGEST_BIN:-$GOOSE_TERM_SUGGEST_HOME/bin/goose-term-suggest}"
-typeset -g GOOSE_TERM_SUGGEST_MODEL="${GOOSE_TERM_SUGGEST_MODEL:-gpt-5-nano}"
+typeset -g GOOSE_TERM_SUGGEST_MODEL="${GOOSE_TERM_SUGGEST_MODEL:-gpt-5.4-nano-medium}"
 typeset -g GOOSE_TERM_SUGGEST_MCFLY_DB="${GOOSE_TERM_SUGGEST_MCFLY_DB:-$HOME/Library/Application Support/McFly/history.db}"
 typeset -g GOOSE_TERM_SUGGEST_PENDING=""
 typeset -g GOOSE_TERM_SUGGEST_LAST_KEY=""
@@ -80,7 +80,7 @@ function __goose_term_suggest_apply_pending() {
     CURSOR=${#BUFFER}
     GOOSE_TERM_SUGGEST_PENDING=""
   fi
-  zle redisplay
+  [[ -n "${WIDGET:-}" ]] && zle redisplay
 }
 
 function __goose_term_suggest_mark_dirty() {
@@ -97,10 +97,52 @@ function __goose_term_suggest_manual_widget() {
     GOOSE_TERM_SUGGEST_LAST_KEY="$(__goose_term_suggest_context_key)"
     GOOSE_TERM_SUGGEST_NEEDS_REFRESH=0
   fi
-  zle redisplay
+  [[ -n "${WIDGET:-}" ]] && zle redisplay
+}
+
+function __goose_term_suggest_command_known() {
+  local cmd="$1"
+  [[ -z "$cmd" ]] && return 1
+  (( $+commands[$cmd] )) && return 0
+  (( $+functions[$cmd] )) && return 0
+  (( $+aliases[$cmd] )) && return 0
+  (( $+builtins[$cmd] )) && return 0
+  (( $+reswords[$cmd] )) && return 0
+  return 1
+}
+
+function __goose_term_suggest_try_complete_unknown() {
+  local -a words
+  local first suggestion
+
+  [[ -z "$BUFFER" ]] && return 1
+  [[ "$BUFFER" == *['|&;<>`$(){}[]']* ]] && return 1
+
+  words=(${(z)BUFFER})
+  (( ${#words[@]} == 0 )) && return 1
+
+  first="${words[1]}"
+  __goose_term_suggest_command_known "$first" && return 1
+
+  suggestion="$(__goose_term_suggest_fetch "$BUFFER" "$GOOSE_TERM_SUGGEST_LAST_COMMAND" "$GOOSE_TERM_SUGGEST_LAST_STATUS")"
+  [[ -z "$suggestion" || "$suggestion" == "$BUFFER" ]] && return 1
+
+  BUFFER="$suggestion"
+  CURSOR=${#BUFFER}
+  GOOSE_TERM_SUGGEST_PENDING=""
+  GOOSE_TERM_SUGGEST_LAST_KEY="$(__goose_term_suggest_context_key)"
+  GOOSE_TERM_SUGGEST_NEEDS_REFRESH=0
+  [[ -n "${WIDGET:-}" ]] && zle redisplay
+  return 0
+}
+
+function __goose_term_suggest_accept_line() {
+  __goose_term_suggest_try_complete_unknown && return 0
+  zle .accept-line
 }
 
 zle -N goose-term-suggest-refresh __goose_term_suggest_manual_widget
+zle -N accept-line __goose_term_suggest_accept_line
 bindkey '^G' goose-term-suggest-refresh
 
 add-zsh-hook preexec __goose_term_suggest_track_preexec
