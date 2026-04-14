@@ -1,23 +1,20 @@
 # goose-term-suggest
 
-Warp-like command prefills for `zsh`, powered by Goose and McFly history.
+Minimal command prefills for `zsh`, powered by Goose.
 
-When a new terminal opens, or when you `cd` into another directory, this project asks Goose for the most likely next shell command based on:
-
-- the current `pwd`
-- the current git repository root
-- the current Goose terminal session history from `goose term init zsh`
-- the last command you ran and its exit status
-- successful and recent commands from McFly history
-
-The suggested command is inserted into the input buffer, but it is never executed automatically.
+On shell start and after `cd`, this project asks Goose for a single shell command suggestion for the current directory and prefills it into an empty prompt buffer. The command is never executed automatically.
 
 ## Requirements
 
 - `zsh`
 - `goose`
-- `mcfly` with a populated history database
-- `python3`
+- Goose terminal integration already initialized in your shell, for example:
+
+```bash
+eval "$(goose term init zsh)"
+```
+
+This project does not run Goose init for you, and it does not define or modify `@g` / `@goose`.
 
 ## Install
 
@@ -38,26 +35,12 @@ exec zsh
 
 ## Behavior
 
-- Runs `eval "$(goose term init zsh)"` automatically if the current shell does not already have `AGENT_SESSION_ID`.
-- Uses `goose term run` so Goose sees the official terminal-integrated session context for the current shell.
-- On shell start and after `cd`, queries Goose for a single command suggestion.
-- Reads command history from `~/Library/Application Support/McFly/history.db`.
-- Passes the last shell command and its exit status to Goose on each refresh.
-- If the last command exits non-zero, the next prompt is recomputed immediately so Goose can suggest a repair-oriented follow-up.
-- Falls back to a history-based command if Goose does not return a valid single-line command.
-- Press `Ctrl+G` to refresh the suggestion manually. If you already typed a partial command, Goose is asked to continue that prefix.
-
-## Configuration
-
-Optional environment variables:
-
-```bash
-export GOOSE_TERM_SUGGEST_MODEL="gpt-5.4-nano-low"
-export GOOSE_TERM_SUGGEST_FAILURE_MODEL="gpt-5.4-nano-medium"
-export GOOSE_TERM_SUGGEST_MCFLY_DB="$HOME/Library/Application Support/McFly/history.db"
-```
-
-Set them before sourcing `lib/goose-terminal-suggest.zsh`.
+- On shell start, fetches one suggestion for the current directory.
+- After `cd`, fetches one new suggestion for the new directory.
+- Inserts the suggestion only when the prompt buffer is empty.
+- Does nothing if `goose` is unavailable or `AGENT_SESSION_ID` is unset.
+- Uses `goose term run` against your existing Goose terminal session.
+- Rejects empty or multiline Goose output instead of forcing a fallback command.
 
 ## Uninstall
 

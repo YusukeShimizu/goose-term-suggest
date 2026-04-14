@@ -3,43 +3,65 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
+START_MARKER="# >>> goose-term-suggest >>>"
+END_MARKER="# <<< goose-term-suggest <<<"
 
-chmod +x "$PROJECT_ROOT/bin/goose-term-suggest"
+mkdir -p "$(dirname "$ZSHRC")"
+touch "$ZSHRC"
 
-python3 - "$PROJECT_ROOT" "$ZSHRC" <<'PY'
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1]).resolve()
-zshrc = Path(sys.argv[2]).expanduser()
-zshrc.parent.mkdir(parents=True, exist_ok=True)
-if not zshrc.exists():
-    zshrc.write_text("", encoding="utf-8")
-
-start = "# >>> goose-term-suggest >>>"
-end = "# <<< goose-term-suggest <<<"
-block = "\n".join(
-    [
-        start,
-        f'export GOOSE_TERM_SUGGEST_HOME="{project_root}"',
-        '[ -f "$GOOSE_TERM_SUGGEST_HOME/lib/goose-terminal-suggest.zsh" ] && source "$GOOSE_TERM_SUGGEST_HOME/lib/goose-terminal-suggest.zsh"',
-        end,
-        "",
-    ]
+BLOCK=$(cat <<EOF
+$START_MARKER
+export GOOSE_TERM_SUGGEST_HOME="$PROJECT_ROOT"
+[ -f "\$GOOSE_TERM_SUGGEST_HOME/lib/goose-terminal-suggest.zsh" ] && source "\$GOOSE_TERM_SUGGEST_HOME/lib/goose-terminal-suggest.zsh"
+$END_MARKER
+EOF
 )
 
-content = zshrc.read_text(encoding="utf-8")
-if start in content and end in content:
-    prefix, rest = content.split(start, 1)
-    _, suffix = rest.split(end, 1)
-    updated = prefix.rstrip("\n") + "\n" + block + suffix.lstrip("\n")
-else:
-    updated = content.rstrip("\n") + "\n\n" + block
+TMP_FILE="$(mktemp)"
 
-zshrc.write_text(updated, encoding="utf-8")
-PY
+if grep -Fqx "$START_MARKER" "$ZSHRC" && grep -Fqx "$END_MARKER" "$ZSHRC"; then
+  awk -v start="$START_MARKER" -v end="$END_MARKER" -v block="$BLOCK" '
+    BEGIN {
+      in_block = 0
+      replaced = 0
+    }
+    $0 == start {
+      if (!replaced) {
+        print block
+        replaced = 1
+      }
+      in_block = 1
+      next
+    }
+    $0 == end {
+      in_block = 0
+      next
+    }
+    !in_block {
+      print
+    }
+    END {
+      if (!replaced) {
+        if (NR > 0) {
+          print ""
+        }
+        print block
+      }
+    }
+  ' "$ZSHRC" > "$TMP_FILE"
+else
+  cat "$ZSHRC" > "$TMP_FILE"
+  if [[ -s "$TMP_FILE" && "$(tail -c 1 "$TMP_FILE" 2>/dev/null || true)" != $'\n' ]]; then
+    printf '\n' >> "$TMP_FILE"
+  fi
+  if [[ -s "$TMP_FILE" ]]; then
+    printf '\n' >> "$TMP_FILE"
+  fi
+  printf '%s\n' "$BLOCK" >> "$TMP_FILE"
+fi
+
+mv "$TMP_FILE" "$ZSHRC"
 
 echo "Installed goose-term-suggest into $ZSHRC"
+echo 'Ensure Goose terminal init is configured separately, e.g. eval "$(goose term init zsh)"'
 echo "Reload with: exec zsh"
