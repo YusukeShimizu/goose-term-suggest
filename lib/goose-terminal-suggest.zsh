@@ -10,7 +10,8 @@ autoload -Uz add-zle-hook-widget 2>/dev/null || true
 
 typeset -g GOOSE_TERM_SUGGEST_HOME="${GOOSE_TERM_SUGGEST_HOME:-${${(%):-%N}:A:h:h}}"
 typeset -g GOOSE_TERM_SUGGEST_BIN="${GOOSE_TERM_SUGGEST_BIN:-$GOOSE_TERM_SUGGEST_HOME/bin/goose-term-suggest}"
-typeset -g GOOSE_TERM_SUGGEST_MODEL="${GOOSE_TERM_SUGGEST_MODEL:-gpt-5.4-nano-medium}"
+typeset -g GOOSE_TERM_SUGGEST_MODEL="${GOOSE_TERM_SUGGEST_MODEL:-gpt-5.4-nano-low}"
+typeset -g GOOSE_TERM_SUGGEST_FAILURE_MODEL="${GOOSE_TERM_SUGGEST_FAILURE_MODEL:-gpt-5.4-nano-medium}"
 typeset -g GOOSE_TERM_SUGGEST_MCFLY_DB="${GOOSE_TERM_SUGGEST_MCFLY_DB:-$HOME/Library/Application Support/McFly/history.db}"
 typeset -g GOOSE_TERM_SUGGEST_PENDING=""
 typeset -g GOOSE_TERM_SUGGEST_LAST_KEY=""
@@ -54,6 +55,7 @@ function __goose_term_suggest_fetch() {
     --repo-root "$root" \
     --history-db "$GOOSE_TERM_SUGGEST_MCFLY_DB" \
     --model "$GOOSE_TERM_SUGGEST_MODEL" \
+    --failure-model "$GOOSE_TERM_SUGGEST_FAILURE_MODEL" \
     --partial "$partial" \
     --last-command "$last_command" \
     --last-status "$last_status" 2>/dev/null

@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import goose_term_suggest
 
@@ -84,6 +85,36 @@ class GooseTermSuggestTests(unittest.TestCase):
         self.assertIn("active Goose terminal session already contains the very recent shell history", prompt)
         self.assertIn("The previous command failed.", prompt)
         self.assertIn("- go mod tidy", prompt)
+
+    def test_non_failure_uses_primary_model(self):
+        with mock.patch.object(goose_term_suggest, "run_goose_term", return_value=("go test ./...", "")) as run_goose:
+            suggestion = goose_term_suggest.suggest_command(
+                cwd="/tmp/project",
+                repo_root="/tmp/project",
+                history_db="/tmp/missing.db",
+                model="gpt-5.4-nano-low",
+                failure_model="gpt-5.4-nano-medium",
+                partial="",
+                last_command="go test ./...",
+                last_status=0,
+            )
+        self.assertEqual(suggestion, "go test ./...")
+        self.assertEqual(run_goose.call_args.args[1], "gpt-5.4-nano-low")
+
+    def test_failure_uses_failure_model(self):
+        with mock.patch.object(goose_term_suggest, "run_goose_term", return_value=("go test -v ./...", "")) as run_goose:
+            suggestion = goose_term_suggest.suggest_command(
+                cwd="/tmp/project",
+                repo_root="/tmp/project",
+                history_db="/tmp/missing.db",
+                model="gpt-5.4-nano-low",
+                failure_model="gpt-5.4-nano-medium",
+                partial="",
+                last_command="go test",
+                last_status=1,
+            )
+        self.assertEqual(suggestion, "go test -v ./...")
+        self.assertEqual(run_goose.call_args.args[1], "gpt-5.4-nano-medium")
 
 
 if __name__ == "__main__":

@@ -52,7 +52,8 @@ exec zsh
 Optional environment variables:
 
 ```bash
-export GOOSE_TERM_SUGGEST_MODEL="gpt-5.4-nano-medium"
+export GOOSE_TERM_SUGGEST_MODEL="gpt-5.4-nano-low"
+export GOOSE_TERM_SUGGEST_FAILURE_MODEL="gpt-5.4-nano-medium"
 export GOOSE_TERM_SUGGEST_MCFLY_DB="$HOME/Library/Application Support/McFly/history.db"
 ```
 

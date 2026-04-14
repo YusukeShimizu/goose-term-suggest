@@ -15,11 +15,12 @@ from typing import Iterable
 
 
 DEFAULT_HISTORY_DB = os.path.expanduser("~/Library/Application Support/McFly/history.db")
-DEFAULT_MODEL = "gpt-5.4-nano-medium"
+DEFAULT_MODEL = "gpt-5.4-nano-low"
+DEFAULT_FAILURE_MODEL = "gpt-5.4-nano-medium"
 GOOSE_TIMEOUT_SECONDS = 12
-EXACT_LIMIT = 15
-REPO_LIMIT = 25
-RECENT_LIMIT = 8
+EXACT_LIMIT = 6
+REPO_LIMIT = 8
+RECENT_LIMIT = 4
 _WHITESPACE_RE = re.compile(r"\s+")
 _CODE_BLOCK_RE = re.compile(r"```(?:[^\n]*\n)?(.*?)```", re.DOTALL)
 LOW_SIGNAL_COMMANDS = (
@@ -306,7 +307,7 @@ def build_candidate_pool(
     if partial_text:
         filtered = [cmd for cmd in candidates if cmd.startswith(partial_text)]
         return filtered or [partial_text]
-    return candidates[:12] or [fallback]
+    return candidates[:6] or [fallback]
 
 
 def build_prompt(
@@ -366,10 +367,10 @@ def build_prompt(
     if exact:
         prompt.extend(["", "Successful McFly commands often used in this exact directory:"])
         prompt.extend(f"- {entry.cmd} (uses={entry.uses})" for entry in exact)
-    if recent_repo:
+    if recent_repo and not exact:
         prompt.extend(["", "Recent McFly commands elsewhere in this repository:"])
         prompt.extend(f"- {entry.cmd} (exit={entry.exit_code})" for entry in recent_repo)
-    if repo:
+    if repo and not exact:
         prompt.extend(["", "Successful McFly commands often used in this repository:"])
         prompt.extend(f"- {entry.cmd} (uses={entry.uses})" for entry in repo)
     prompt.extend(["", "Candidate fallbacks from McFly history:"])
@@ -451,6 +452,7 @@ def suggest_command(
     repo_root: str,
     history_db: str,
     model: str,
+    failure_model: str,
     partial: str,
     last_command: str,
     last_status: int,
@@ -483,7 +485,8 @@ def suggest_command(
         recent_repo,
         candidates,
     )
-    raw, _ = run_goose_term(prompt, model)
+    selected_model = failure_model if last_status != 0 else model
+    raw, _ = run_goose_term(prompt, selected_model)
     suggestion = sanitize_suggestion(raw, partial)
     if suggestion:
         return suggestion
@@ -513,6 +516,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repo-root", default="", help="Repository root for the current directory")
     parser.add_argument("--history-db", default=DEFAULT_HISTORY_DB, help="Path to the McFly SQLite database")
     parser.add_argument("--model", default=os.environ.get("GOOSE_TERM_SUGGEST_MODEL", DEFAULT_MODEL))
+    parser.add_argument(
+        "--failure-model",
+        default=os.environ.get("GOOSE_TERM_SUGGEST_FAILURE_MODEL", DEFAULT_FAILURE_MODEL),
+        help="Model to use when the last command failed",
+    )
     parser.add_argument("--partial", default="", help="Partial command prefix to continue")
     parser.add_argument("--last-command", default="", help="Last shell command that ran before the prompt")
     parser.add_argument("--last-status", type=int, default=0, help="Exit status for the last command")
@@ -529,6 +537,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root,
         args.history_db,
         args.model,
+        args.failure_model,
         args.partial,
         _normalize_cmd(args.last_command),
         args.last_status,
@@ -539,6 +548,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"repo_root={repo_root}", file=sys.stderr)
         print(f"last_command={args.last_command!r} last_status={args.last_status}", file=sys.stderr)
         print(f"agent_session={'AGENT_SESSION_ID' in os.environ}", file=sys.stderr)
+        print(
+            f"selected_model={args.failure_model if args.last_status != 0 else args.model}",
+            file=sys.stderr,
+        )
         print(f"exact={len(exact)} repo={len(repo)} recent_exact={len(recent_exact)} recent_repo={len(recent_repo)}", file=sys.stderr)
         print(f"suggestion={suggestion}", file=sys.stderr)
     if suggestion:
