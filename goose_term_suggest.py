@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shlex
 import sqlite3
 import subprocess
 import sys
@@ -21,7 +20,6 @@ GOOSE_TIMEOUT_SECONDS = 12
 EXACT_LIMIT = 15
 REPO_LIMIT = 25
 RECENT_LIMIT = 8
-LAST_OUTPUT_LIMIT = 4000
 _WHITESPACE_RE = re.compile(r"\s+")
 _CODE_BLOCK_RE = re.compile(r"```(?:[^\n]*\n)?(.*?)```", re.DOTALL)
 LOW_SIGNAL_COMMANDS = (
@@ -277,9 +275,6 @@ def build_candidate_pool(
     partial: str,
     last_command: str,
     last_status: int,
-    last_output: str,
-    cwd: str,
-    repo_root: str,
     exact: list[HistoryEntry],
     repo: list[HistoryEntry],
     recent_exact: list[RecentEntry],
@@ -295,12 +290,7 @@ def build_candidate_pool(
         if normalized not in candidates:
             candidates.append(normalized)
 
-    if last_status == 1 and last_command:
-        for cmd in output_followups(last_command, cwd, repo_root, last_output):
-            add(cmd)
-        for cmd in failure_followups(last_command):
-            add(cmd)
-    if last_command:
+    if last_command and last_status == 0:
         add(last_command)
     for entry in recent_exact:
         add(entry.cmd)
@@ -310,7 +300,6 @@ def build_candidate_pool(
         add(entry.cmd)
     for entry in repo:
         add(entry.cmd)
-
     add(fallback)
 
     partial_text = partial.strip()
@@ -320,54 +309,12 @@ def build_candidate_pool(
     return candidates[:12] or [fallback]
 
 
-def failure_followups(last_command: str) -> list[str]:
-    cmd = _normalize_cmd(last_command)
-    try:
-        parts = shlex.split(cmd)
-    except ValueError:
-        parts = cmd.split()
-    if not parts:
-        return []
-
-    if parts[:2] == ["go", "test"]:
-        return [f"{cmd} 2>&1 | tail -n 80", "rg -n 'FAIL|panic:|expected|got|error:' ."]
-    if parts[:2] == ["go", "build"] or parts[:2] == ["go", "run"]:
-        return [f"{cmd} 2>&1 | tail -n 80"]
-    if parts[:2] == ["cargo", "test"]:
-        return ["cargo test -- --nocapture", "rg -n 'panic!|assert|expected|error' ."]
-    if parts[:2] == ["cargo", "build"]:
-        return ["cargo build -vv"]
-    if parts and parts[0] == "pytest":
-        return ["pytest -x -vv"]
-    if parts[:3] == ["python3", "-m", "pytest"]:
-        return ["python3 -m pytest -x -vv"]
-    if parts[:3] == ["python3", "-m", "unittest"]:
-        return ["python3 -m unittest -v"]
-    if parts[:2] == ["git", "commit"] or parts[:2] == ["git", "push"]:
-        return ["git status"]
-    return []
-
-
-def output_followups(last_command: str, cwd: str, repo_root: str, last_output: str) -> list[str]:
-    output = last_output.lower()
-    repo_name = Path(repo_root or cwd).name or "my-module"
-
-    if "cannot find main module" in output and "go mod init" in output:
-        return [f"go mod init {repo_name}", "go test ./..."]
-
-    if "no required module provides package" in output and last_command.startswith("go "):
-        return ["go mod tidy"]
-
-    return []
-
-
 def build_prompt(
     cwd: str,
     repo_root: str,
     partial: str,
     last_command: str,
     last_status: int,
-    last_output: str,
     exact: list[HistoryEntry],
     repo: list[HistoryEntry],
     recent_exact: list[RecentEntry],
@@ -380,12 +327,18 @@ def build_prompt(
         "Return exactly one shell command.",
         "Output one line only.",
         "Do not include markdown, quotes, bullets, or explanations.",
-        "Prefer commands from the provided history when they fit the situation.",
-        "Use the last command and its exit status heavily.",
-        "Do not default to git status unless repo state inspection is the strongest remaining signal.",
-        "Do not suggest agent launcher commands such as goose, codex, claude, or opencode unless the user already started typing that prefix.",
-        "You must choose one command from the provided candidate list and return it verbatim.",
+        "The active Goose terminal session already contains the very recent shell history for this terminal.",
+        "Use that terminal-session context together with the McFly history below.",
+        "Prefer concrete commands the user is likely to run next.",
+        "Do not default to git status unless repo inspection is clearly the strongest signal.",
+        "Do not suggest agent launcher commands such as goose, codex, claude, or opencode unless the user already typed that prefix.",
     ]
+    if last_command:
+        instructions.append("Use the last command and its exit status heavily.")
+    if last_status != 0:
+        instructions.append(
+            "The previous command failed. Prefer a repair, retry with better flags, or a targeted follow-up over generic inspection."
+        )
     if partial_text:
         instructions.append(f"The command must start with this prefix: {partial_text}")
     else:
@@ -404,48 +357,42 @@ def build_prompt(
                 "",
                 f"Last command: {last_command}",
                 f"Last command exit status: {last_status}",
-                "Interpret the result: exit status 0 means success, non-zero means failure.",
+                "Interpret exit status 0 as success and non-zero as failure.",
             ]
         )
-    if last_output:
-        prompt.extend(["", "Last command output (truncated):", last_output])
-    prompt.extend(["", "Candidate commands (choose one exactly):"])
-    prompt.extend(f"- {candidate}" for candidate in candidates)
     if recent_exact:
-        prompt.extend(["", "Recent commands in this exact directory:"])
+        prompt.extend(["", "Recent McFly commands in this exact directory:"])
         prompt.extend(f"- {entry.cmd} (exit={entry.exit_code})" for entry in recent_exact)
     if exact:
-        prompt.extend(["", "Successful commands often used in this exact directory:"])
+        prompt.extend(["", "Successful McFly commands often used in this exact directory:"])
         prompt.extend(f"- {entry.cmd} (uses={entry.uses})" for entry in exact)
     if recent_repo:
-        prompt.extend(["", "Recent commands elsewhere in this repository:"])
+        prompt.extend(["", "Recent McFly commands elsewhere in this repository:"])
         prompt.extend(f"- {entry.cmd} (exit={entry.exit_code})" for entry in recent_repo)
     if repo:
-        prompt.extend(["", "Successful commands often used in this repository:"])
+        prompt.extend(["", "Successful McFly commands often used in this repository:"])
         prompt.extend(f"- {entry.cmd} (uses={entry.uses})" for entry in repo)
+    prompt.extend(["", "Candidate fallbacks from McFly history:"])
+    prompt.extend(f"- {candidate}" for candidate in candidates)
     prompt.extend(
         [
             "",
             "Fallback policy:",
-            "- If the last command failed with exit status 1, prefer a fix-oriented follow-up related to that command.",
-            "- Only return git status if repo inspection is clearly the best next step.",
-            "- If no stronger signal exists outside git, return ls -la.",
+            "- Prefer a repair-oriented next step after failures.",
+            "- Prefer McFly-backed commands when they fit.",
+            "- If nothing stronger exists, pick the best candidate fallback.",
         ]
     )
     return "\n".join(prompt)
 
 
-def run_goose(prompt: str, model: str) -> tuple[str, str]:
-    cmd = [
-        "goose",
-        "run",
-        "--quiet",
-        "--no-session",
-        "--model",
-        model,
-        "--text",
-        prompt,
-    ]
+def run_goose_term(prompt: str, model: str) -> tuple[str, str]:
+    if "AGENT_SESSION_ID" not in os.environ:
+        return "", "missing AGENT_SESSION_ID"
+
+    cmd = ["goose", "term", "run", prompt]
+    env = os.environ.copy()
+    env["GOOSE_MODEL"] = model
     try:
         proc = subprocess.run(
             cmd,
@@ -454,6 +401,7 @@ def run_goose(prompt: str, model: str) -> tuple[str, str]:
             text=True,
             check=False,
             timeout=GOOSE_TIMEOUT_SECONDS,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return "", str(exc)
@@ -506,7 +454,6 @@ def suggest_command(
     partial: str,
     last_command: str,
     last_status: int,
-    last_output: str,
 ) -> str:
     exact, repo, recent_exact, recent_repo = query_history(history_db, cwd, repo_root)
     fallback = default_candidate(cwd, repo_root, exact, repo)
@@ -518,9 +465,6 @@ def suggest_command(
         partial,
         last_command,
         last_status,
-        last_output,
-        cwd,
-        repo_root,
         exact,
         repo,
         recent_exact,
@@ -533,16 +477,15 @@ def suggest_command(
         partial,
         last_command,
         last_status,
-        last_output,
         exact,
         repo,
         recent_exact,
         recent_repo,
         candidates,
     )
-    raw, _ = run_goose(prompt, model)
+    raw, _ = run_goose_term(prompt, model)
     suggestion = sanitize_suggestion(raw, partial)
-    if suggestion and suggestion in candidates:
+    if suggestion:
         return suggestion
     return candidates[0] if candidates else _apply_partial_fallback(fallback, partial)
 
@@ -573,31 +516,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--partial", default="", help="Partial command prefix to continue")
     parser.add_argument("--last-command", default="", help="Last shell command that ran before the prompt")
     parser.add_argument("--last-status", type=int, default=0, help="Exit status for the last command")
-    parser.add_argument("--last-output", default="", help="Truncated output from the last shell command")
-    parser.add_argument("--last-output-file", default="", help="File containing output from the last shell command")
     parser.add_argument("--print-debug", action="store_true", help="Print debug data to stderr")
     return parser.parse_args(argv)
-
-
-def load_last_output(last_output: str, last_output_file: str) -> str:
-    if last_output_file:
-        try:
-            text = Path(last_output_file).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            text = ""
-    else:
-        text = last_output
-    text = text.strip()
-    if len(text) > LAST_OUTPUT_LIMIT:
-        text = text[-LAST_OUTPUT_LIMIT:]
-    return text
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     cwd = os.path.abspath(os.path.expanduser(args.pwd))
     repo_root = os.path.abspath(os.path.expanduser(args.repo_root)) if args.repo_root else ""
-    last_output = load_last_output(args.last_output, args.last_output_file)
     suggestion = suggest_command(
         cwd,
         repo_root,
@@ -606,14 +532,13 @@ def main(argv: list[str] | None = None) -> int:
         args.partial,
         _normalize_cmd(args.last_command),
         args.last_status,
-        last_output,
     )
     if args.print_debug:
         exact, repo, recent_exact, recent_repo = query_history(args.history_db, cwd, repo_root)
         print(f"cwd={cwd}", file=sys.stderr)
         print(f"repo_root={repo_root}", file=sys.stderr)
         print(f"last_command={args.last_command!r} last_status={args.last_status}", file=sys.stderr)
-        print(f"last_output={last_output!r}", file=sys.stderr)
+        print(f"agent_session={'AGENT_SESSION_ID' in os.environ}", file=sys.stderr)
         print(f"exact={len(exact)} repo={len(repo)} recent_exact={len(recent_exact)} recent_repo={len(recent_repo)}", file=sys.stderr)
         print(f"suggestion={suggestion}", file=sys.stderr)
     if suggestion:

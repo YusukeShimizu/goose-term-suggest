@@ -6,6 +6,7 @@ When a new terminal opens, or when you `cd` into another directory, this project
 
 - the current `pwd`
 - the current git repository root
+- the current Goose terminal session history from `goose term init zsh`
 - the last command you ran and its exit status
 - successful and recent commands from McFly history
 
@@ -38,10 +39,11 @@ exec zsh
 ## Behavior
 
 - Runs `eval "$(goose term init zsh)"` automatically if the current shell does not already have `AGENT_SESSION_ID`.
+- Uses `goose term run` so Goose sees the official terminal-integrated session context for the current shell.
 - On shell start and after `cd`, queries Goose for a single command suggestion.
 - Reads command history from `~/Library/Application Support/McFly/history.db`.
-- Passes the last shell command, its exit status, and the previous command output to Goose on each refresh.
-- If the last command exited with status `1`, it prefers a fix-oriented follow-up such as verbose reruns, targeted inspection, or output-specific fixes like `go mod init ...`.
+- Passes the last shell command and its exit status to Goose on each refresh.
+- If the last command exits non-zero, the next prompt is recomputed immediately so Goose can suggest a repair-oriented follow-up.
 - Falls back to a history-based command if Goose does not return a valid single-line command.
 - Press `Ctrl+G` to refresh the suggestion manually. If you already typed a partial command, Goose is asked to continue that prefix.
 

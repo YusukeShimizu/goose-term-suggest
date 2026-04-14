@@ -17,9 +17,6 @@ typeset -g GOOSE_TERM_SUGGEST_LAST_KEY=""
 typeset -g GOOSE_TERM_SUGGEST_NEEDS_REFRESH=1
 typeset -g GOOSE_TERM_SUGGEST_LAST_COMMAND=""
 typeset -g GOOSE_TERM_SUGGEST_LAST_STATUS=0
-typeset -g GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE=""
-typeset -g GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD=""
-typeset -g GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD=""
 
 if command -v goose >/dev/null 2>&1 && [[ -z "${AGENT_SESSION_ID:-}" ]]; then
   eval "$(goose term init zsh)"
@@ -42,23 +39,6 @@ function __goose_term_suggest_context_key() {
 
 function __goose_term_suggest_track_preexec() {
   GOOSE_TERM_SUGGEST_LAST_COMMAND="$1"
-  GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/goose-term-suggest.XXXXXX")"
-  exec {GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD}>&1
-  exec {GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD}>&2
-  exec > >(tee "$GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE") 2>&1
-}
-
-function __goose_term_suggest_stop_capture() {
-  if [[ -n "$GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD" ]]; then
-    exec 1>&$GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD
-    exec {GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD}>&-
-    GOOSE_TERM_SUGGEST_CAPTURE_STDOUT_FD=""
-  fi
-  if [[ -n "$GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD" ]]; then
-    exec 2>&$GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD
-    exec {GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD}>&-
-    GOOSE_TERM_SUGGEST_CAPTURE_STDERR_FD=""
-  fi
 }
 
 function __goose_term_suggest_fetch() {
@@ -76,14 +56,12 @@ function __goose_term_suggest_fetch() {
     --model "$GOOSE_TERM_SUGGEST_MODEL" \
     --partial "$partial" \
     --last-command "$last_command" \
-    --last-status "$last_status" \
-    --last-output-file "$GOOSE_TERM_SUGGEST_LAST_OUTPUT_FILE" 2>/dev/null
+    --last-status "$last_status" 2>/dev/null
 }
 
 function __goose_term_suggest_queue() {
   local last_status=$?
   local key suggestion
-  __goose_term_suggest_stop_capture
   GOOSE_TERM_SUGGEST_LAST_STATUS=$last_status
   key="$(__goose_term_suggest_context_key)"
   if [[ "$last_status" -eq 0 && "$GOOSE_TERM_SUGGEST_NEEDS_REFRESH" != "1" && "$GOOSE_TERM_SUGGEST_LAST_KEY" == "$key" ]]; then

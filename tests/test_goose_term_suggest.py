@@ -45,9 +45,6 @@ class GooseTermSuggestTests(unittest.TestCase):
             partial="",
             last_command="claude --dangerously-skip-permissions",
             last_status=1,
-            last_output="",
-            cwd="/tmp/project",
-            repo_root="/tmp/project",
             exact=[goose_term_suggest.HistoryEntry(cmd="go test ./...", uses=3, last_run=10, scope="pwd")],
             repo=[],
             recent_exact=[],
@@ -57,47 +54,36 @@ class GooseTermSuggestTests(unittest.TestCase):
         self.assertEqual(candidates[0], "go test ./...")
         self.assertNotIn("claude --dangerously-skip-permissions", candidates)
 
-    def test_failure_followups_for_go_test(self):
-        self.assertEqual(
-            goose_term_suggest.failure_followups("go test ./..."),
-            ["go test ./... 2>&1 | tail -n 80", "rg -n 'FAIL|panic:|expected|got|error:' ."],
-        )
-
-    def test_build_candidate_pool_prefers_fix_for_exit_code_one(self):
+    def test_build_candidate_pool_omits_failed_command_and_uses_history(self):
         candidates = goose_term_suggest.build_candidate_pool(
             partial="",
-            last_command="go test ./...",
+            last_command="go test",
             last_status=1,
-            last_output="",
-            cwd="/tmp/project",
-            repo_root="/tmp/project",
-            exact=[goose_term_suggest.HistoryEntry(cmd="git status", uses=3, last_run=10, scope="pwd")],
+            exact=[goose_term_suggest.HistoryEntry(cmd="go test ./...", uses=3, last_run=10, scope="pwd")],
             repo=[],
-            recent_exact=[],
+            recent_exact=[goose_term_suggest.RecentEntry(cmd="go mod tidy", exit_code=0, when_run=11, scope="pwd")],
             recent_repo=[],
             fallback="git status",
         )
-        self.assertEqual(candidates[0], "go test ./... 2>&1 | tail -n 80")
+        self.assertEqual(candidates[0], "go mod tidy")
+        self.assertNotIn("go test", candidates)
 
-    def test_output_followups_for_go_module_error(self):
-        self.assertEqual(
-            goose_term_suggest.output_followups(
-                "go test",
-                "/tmp/goose-term-suggest",
-                "/tmp/goose-term-suggest",
-                "go: cannot find main module, but found .git/config\n        to create a module there, run:\n        go mod init\n",
-            ),
-            ["go mod init goose-term-suggest", "go test ./..."],
+    def test_build_prompt_mentions_terminal_session_context(self):
+        prompt = goose_term_suggest.build_prompt(
+            cwd="/tmp/project",
+            repo_root="/tmp/project",
+            partial="",
+            last_command="go test",
+            last_status=1,
+            exact=[],
+            repo=[],
+            recent_exact=[],
+            recent_repo=[],
+            candidates=["go mod tidy", "git status"],
         )
-
-    def test_load_last_output_from_file(self):
-        import tempfile
-        from pathlib import Path
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "out.txt"
-            path.write_text("hello\nworld\n", encoding="utf-8")
-            self.assertEqual(goose_term_suggest.load_last_output("", str(path)), "hello\nworld")
+        self.assertIn("active Goose terminal session already contains the very recent shell history", prompt)
+        self.assertIn("The previous command failed.", prompt)
+        self.assertIn("- go mod tidy", prompt)
 
 
 if __name__ == "__main__":
