@@ -22,6 +22,12 @@ By default, suggestions use `gpt-5.4-nano-low`. You can override that with:
 export GOOSE_TERM_SUGGEST_MODEL="gpt-5.4-nano-low"
 ```
 
+Prefilled suggestions are highlighted with `fg=8` so they stay visible on light terminal themes. You can override that with:
+
+```bash
+export GOOSE_TERM_SUGGEST_HIGHLIGHT_STYLE="fg=black"
+```
+
 ## Install
 
 ```bash
